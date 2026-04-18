@@ -66,6 +66,8 @@ jobs:
     needs: build-windows
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    permissions:
+      contents: write
 
     steps:
       - name: Download build artifact
