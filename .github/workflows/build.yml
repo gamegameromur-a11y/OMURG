@@ -1,0 +1,104 @@
+name: Build OMURG
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    name: Build Windows x64 (MSVC)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract source ZIP if present
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem -Filter "*.zip" -File | Select-Object -First 1
+          if ($zip) {
+            Write-Host "ZIP bulundu: $($zip.Name), cikartiliyor..."
+            Expand-Archive -Path $zip.FullName -DestinationPath "." -Force
+            $inner = Get-ChildItem -Directory | Where-Object { $_.Name -ne ".github" } | Select-Object -First 1
+            if ($inner -and (Test-Path "$($inner.FullName)/CMakeLists.txt")) {
+              Write-Host "Klasor tasiniyor: $($inner.Name)"
+              Get-ChildItem $inner.FullName | Move-Item -Destination . -Force
+              Remove-Item $inner.FullName -Recurse -Force
+            }
+          } else {
+            Write-Host "ZIP bulunamadi, kaynak kodlar zaten mevcut."
+          }
+
+      - name: Setup MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Configure CMake
+        run: |
+          cmake -B build -G "Visual Studio 17 2022" -A x64 `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DOMURG_BUILD_TESTS=OFF
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Gather output files
+        run: |
+          mkdir -p release_output
+          copy build\Release\OMURG.exe release_output\OMURG.exe
+          xcopy /E /I build\Release\drivers release_output\drivers
+          copy build\Release\version_manifest.json release_output\version_manifest.json
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OMURG-Windows-x64
+          path: release_output\
+          retention-days: 30
+
+  release:
+    name: Create GitHub Release
+    needs: build-windows
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: OMURG-Windows-x64
+          path: release_output
+
+      - name: Zip release files
+        run: |
+          cd release_output
+          zip -r ../OMURG-Windows-x64.zip .
+
+      - name: Get version
+        id: version
+        run: |
+          VERSION=$(cat release_output/version_manifest.json | python3 -c "import sys,json; print(json.load(sys.stdin)['appVersion'])")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: OMURG v${{ steps.version.outputs.version }}
+          body: |
+            ## OMURG v${{ steps.version.outputs.version }}
+
+            Windows x64 build — GitHub Actions ile otomatik derlendi.
+
+            ### İndirme
+            `OMURG-Windows-x64.zip` dosyasını indir, içinden `OMURG.exe` çalıştır.
+          files: OMURG-Windows-x64.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
