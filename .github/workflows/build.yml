@@ -38,15 +38,17 @@ jobs:
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
+      - name: Clone ImGui (FetchContent race condition bypass)
+        run: |
+          git clone --depth=1 --branch docking https://github.com/ocornut/imgui.git imgui_src
+
       - name: Configure CMake
         run: |
           cmake -B build -G "Visual Studio 17 2022" -A x64 `
             -DCMAKE_BUILD_TYPE=Release `
             -DOMURG_BUILD_TESTS=OFF `
-            -DFETCHCONTENT_UPDATES_DISCONNECTED=ON
-
-      - name: Pre-fetch ImGui (tek thread - race condition onlenir)
-        run: cmake --build build --config Release --target imgui_lib
+            -DFETCHCONTENT_UPDATES_DISCONNECTED=ON `
+            -DFETCHCONTENT_SOURCE_DIR_IMGUI="${{ github.workspace }}/imgui_src"
 
       - name: Build
         run: cmake --build build --config Release --parallel
